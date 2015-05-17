@@ -3,3 +3,4 @@ static const char *colorname[NUMCOLS] = {
 	"#005577",   /* during input */
 	"#440000",   /* failed/cleared the input */
 };
+static const Bool failonclear = False;
