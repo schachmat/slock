@@ -26,7 +26,7 @@
 enum {
 	INIT,
 	INPUT,
-	EMPTY,
+	FAILED,
 	NUMCOLS
 };
 
@@ -42,6 +42,7 @@ typedef struct {
 static Lock **locks;
 static int nscreens;
 static Bool running = True;
+static Bool failure = False;
 static Bool rr;
 static int rrevbase;
 static int rrerrbase;
@@ -118,11 +119,12 @@ readpw(Display *dpy, const char *pws)
 {
 	char buf[32], passwd[256];
 	int num, screen;
-	unsigned int len, llen;
+	unsigned int len, color;
 	KeySym ksym;
 	XEvent ev;
+	static int oldc = INIT;
 
-	len = llen = 0;
+	len = 0;
 	running = True;
 
 	/* As "slock" stands for "Simple X display locker", the DPMS settings
@@ -132,7 +134,7 @@ readpw(Display *dpy, const char *pws)
 	while (running && !XNextEvent(dpy, &ev)) {
 		if (ev.type == KeyPress) {
 			buf[0] = 0;
-			num = XLookupString(&ev.xkey, buf, sizeof buf, &ksym, 0);
+			num = XLookupString(&ev.xkey, buf, sizeof(buf), &ksym, 0);
 			if (IsKeypadKey(ksym)) {
 				if (ksym == XK_KP_Enter)
 					ksym = XK_Return;
@@ -153,8 +155,10 @@ readpw(Display *dpy, const char *pws)
 #else
 				running = !!strcmp(crypt(passwd, pws), pws);
 #endif
-				if (running)
+				if (running) {
 					XBell(dpy, 100);
+					failure = True;
+				}
 				len = 0;
 				break;
 			case XK_Escape:
@@ -165,24 +169,20 @@ readpw(Display *dpy, const char *pws)
 					--len;
 				break;
 			default:
-				if (num && !iscntrl((int) buf[0]) && (len + num < sizeof passwd)) {
+				if (num && !iscntrl((int) buf[0]) && (len + num < sizeof(passwd))) {
 					memcpy(passwd + len, buf, num);
 					len += num;
 				}
 				break;
 			}
-			if (llen == 0 && len != 0) {
+			color = len ? INPUT : (failure || failonclear ? FAILED : INIT);
+			if (oldc != color) {
 				for (screen = 0; screen < nscreens; screen++) {
-					XSetWindowBackground(dpy, locks[screen]->win, locks[screen]->colors[INPUT]);
+					XSetWindowBackground(dpy, locks[screen]->win, locks[screen]->colors[color]);
 					XClearWindow(dpy, locks[screen]->win);
 				}
-			} else if (llen != 0 && len == 0) {
-				for (screen = 0; screen < nscreens; screen++) {
-					XSetWindowBackground(dpy, locks[screen]->win, locks[screen]->colors[EMPTY]);
-					XClearWindow(dpy, locks[screen]->win);
-				}
+				oldc = color;
 			}
-			llen = len;
 		} else if (rr && ev.type == rrevbase + RRScreenChangeNotify) {
 			XRRScreenChangeNotifyEvent *rre = (XRRScreenChangeNotifyEvent*)&ev;
 			for (screen = 0; screen < nscreens; screen++) {
