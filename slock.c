@@ -344,7 +344,7 @@ main(int argc, char **argv) {
 		if (dpy)
 			close(ConnectionNumber(dpy));
 		execvp(argv[1], argv+1);
-		die("surf: execvp %s failed: %s\n", argv[1], strerror(errno));
+		die("slock: execvp %s failed: %s\n", argv[1], strerror(errno));
 	}
 
 	/* Everything is now blank. Now wait for the correct password. */
