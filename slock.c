@@ -94,20 +94,18 @@ getpw(void)
 	struct passwd *pw;
 
 	errno = 0;
-	pw = getpwuid(getuid());
-	if (!pw) {
+	if (!(pw = getpwuid(getuid()))) {
 		if (errno)
 			die("slock: getpwuid: %s\n", strerror(errno));
 		else
 			die("slock: cannot retrieve password entry\n");
 	}
-	rval =  pw->pw_passwd;
+	rval = pw->pw_passwd;
 
 #if HAVE_SHADOW_H
 	if (rval[0] == 'x' && rval[1] == '\0') {
 		struct spwd *sp;
-		sp = getspnam(getenv("USER"));
-		if (!sp)
+		if (!(sp = getspnam(getenv("USER"))))
 			die("slock: cannot retrieve shadow entry (make sure to suid or sgid slock)\n");
 		rval = sp->sp_pwdp;
 	}
@@ -180,7 +178,7 @@ readpw(Display *dpy, const char *pws)
 					--len;
 				break;
 			default:
-				if (num && !iscntrl((int) buf[0]) && (len + num < sizeof(passwd))) {
+				if (num && !iscntrl((int)buf[0]) && (len + num < sizeof(passwd))) {
 					memcpy(passwd + len, buf, num);
 					len += num;
 				}
@@ -232,15 +230,10 @@ lockscreen(Display *dpy, int screen)
 	XSetWindowAttributes wa;
 	Cursor invisible;
 
-	if (dpy == NULL || screen < 0)
-		return NULL;
-
-	lock = malloc(sizeof(Lock));
-	if (lock == NULL)
+	if (!running || dpy == NULL || screen < 0 || !(lock = malloc(sizeof(Lock))))
 		return NULL;
 
 	lock->screen = screen;
-
 	lock->root = RootWindow(dpy, lock->screen);
 
 	for (i = 0; i < NUMCOLS; i++) {
@@ -260,30 +253,31 @@ lockscreen(Display *dpy, int screen)
 	XMapRaised(dpy, lock->win);
 	if (rr)
 		XRRSelectInput(dpy, lock->win, RRScreenChangeNotifyMask);
+
+	/* Try to grab mouse pointer *and* keyboard, else fail the lock */
 	for (len = 1000; len; len--) {
 		if (XGrabPointer(dpy, lock->root, False, ButtonPressMask | ButtonReleaseMask | PointerMotionMask,
 		    GrabModeAsync, GrabModeAsync, None, invisible, CurrentTime) == GrabSuccess)
 			break;
 		usleep(1000);
 	}
-	if (running && (len > 0)) {
+	if (!len) {
+		fprintf(stderr, "slock: unable to grab mouse pointer for screen %d\n", screen);
+	} else {
 		for (len = 1000; len; len--) {
-			if (XGrabKeyboard(dpy, lock->root, True, GrabModeAsync, GrabModeAsync, CurrentTime) == GrabSuccess)
-				break;
+			if (XGrabKeyboard(dpy, lock->root, True, GrabModeAsync, GrabModeAsync, CurrentTime) == GrabSuccess) {
+				/* everything fine, we grabbed both inputs */
+				XSelectInput(dpy, lock->root, SubstructureNotifyMask);
+				return lock;
+			}
 			usleep(1000);
 		}
+		fprintf(stderr, "slock: unable to grab keyboard for screen %d\n", screen);
 	}
-
-	running &= (len > 0);
-	if (!running) {
-		unlockscreen(dpy, lock);
-		lock = NULL;
-	}
-	else {
-		XSelectInput(dpy, lock->root, SubstructureNotifyMask);
-	}
-
-	return lock;
+	/* grabbing one of the inputs failed */
+	running = 0;
+	unlockscreen(dpy, lock);
+	return NULL;
 }
 
 static void
@@ -323,12 +317,11 @@ main(int argc, char **argv) {
 	rr = XRRQueryExtension(dpy, &rrevbase, &rrerrbase);
 	/* Get the number of screens in display "dpy" and blank them all. */
 	nscreens = ScreenCount(dpy);
-	locks = malloc(sizeof(Lock *) * nscreens);
-	if (locks == NULL)
+	if (!(locks = malloc(sizeof(Lock*) * nscreens)))
 		die("slock: malloc: %s\n", strerror(errno));
 	int nlocks = 0;
 	for (screen = 0; screen < nscreens; screen++) {
-		if ( (locks[screen] = lockscreen(dpy, screen)) != NULL)
+		if ((locks[screen] = lockscreen(dpy, screen)) != NULL)
 			nlocks++;
 	}
 	XSync(dpy, False);
